@@ -125,9 +125,24 @@ Treat `is_final:false` messages as a replaceable preview; append only
 `POST /v1/audio/transcriptions` accepts two extra form fields:
 
 - `diarize` (`true`/`false`, default `false`) — run CAM++ speaker embedding
-  extraction per VAD segment and cluster them (cosine distance, threshold 0.45).
+  extraction on independent voice windows and cluster them (cosine distance,
+  threshold 0.45).
 - `max_speakers` (int, optional) — force exactly that many clusters instead of
-  automatic count detection.
+  automatic count detection (when enough embeddings are available). Use `1`
+  for a known solo singer or speaker: all spoken segments get `speaker: 0`,
+  and embedding inference is skipped. The UI calls this “Known speaker count”.
+
+Automatic analysis uses six-second windows every three seconds, requiring 70%
+VAD voice coverage. This gives speaker embeddings consistent context independent
+of ASR phrase cuts, and excludes windows dominated by pauses or trailing audio.
+Segments receive the speaker with the most overlapping window support; segments
+without support inherit the nearest analyzed window. No speaker-count input is
+required. The optional known-count override remains available.
+
+This is segment-level diarization: short speaker turns can be smoothed over,
+and a speaker change inside one transcript segment cannot receive two labels.
+VAD can still mistake music for voice. Missing usable embeddings fall back to
+one speaker.
 
 `verbose_json` responses then carry `speakers: N` and a `speaker: i` (0-based)
 on every segment. Diarization is only meaningful on files with ≥2 segments;
@@ -149,8 +164,8 @@ single-utterance files always return `speakers: 1`.
 | `FUNASR_MAX_UPLOAD_BYTES` | `209715200` | upload cap (200 MB) |
 | `FUNASR_MAX_WS_CONNECTIONS` | `100` | realtime connection cap |
 | `FUNASR_CHUNK_INTERVAL_MS` | `100` | VAD feeding granularity |
-| `FUNASR_VAD_SPLIT_SILENCE_MS` | `300` | minimum VAD gap preferred as an upload chunk boundary |
-| `FUNASR_ASR_TARGET_MS` | `15000` | target upload ASR duration; shorter files are decoded once |
+| `FUNASR_VAD_SPLIT_SILENCE_MS` | `300` | minimum upload VAD gap for a phrase boundary; also controls VAD endpoint silence (minimum 200 ms) |
+| `FUNASR_ASR_TARGET_MS` | `15000` | fallback cut target only when no pause exists before the hard maximum |
 | `FUNASR_VAD_MAX_SEGMENT_MS` | `20000` | hard maximum ASR chunk duration for uploads and realtime final decoding |
 | `FUNASR_ASR_OVERLAP_MS` | `500` | context overlap at forced upload boundaries |
 | `FUNASR_PARTIAL_INTERVAL_MS` | `500` | partial refresh cadence |
@@ -161,7 +176,10 @@ single-utterance files always return `speakers: 1`.
 Uploads require **ffmpeg**. Compressed input and decoded 16 kHz float32 PCM
 are held in temporary files, removed after success or failure. Allow about
 230 MB of temporary disk space per hour of decoded audio, plus the upload.
-VAD runs in independent 30-second windows; its output only suggests cuts.
+VAD runs in independent 30-second windows. Uploads split at the first detected
+pause of at least 300 ms (configurable), with a minimum chunk duration of one
+second. Speech without a qualifying pause stays together up to the hard maximum
+of 20 seconds; only then does the planner use the fallback cut target.
 Every sample, including leading/trailing audio and missed VAD regions, reaches
 ASR. Forced boundaries use a nearby low-energy point and context overlap.
 Overlap reconciliation removes only exact multi-token/character boundary matches;

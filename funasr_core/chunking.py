@@ -18,8 +18,9 @@ def plan_chunks(audio, vad_segments, target_ms=15000, max_ms=20000,
                 silence_ms=300, overlap_ms=500):
     """Return sample-exact windows covering all input, each <= max_ms.
 
-    Forced cuts overlap; confirmed silence cuts do not. Energy is measured
-    in 20 ms frames only inside the small boundary search window.
+    Split at the first qualifying VAD pause, independently of target_ms.
+    Only speech exceeding max_ms needs a forced cut near target_ms.
+    Forced cuts overlap; confirmed silence cuts do not.
     """
     maximum = max(1000, int(max_ms)) * SAMPLE_RATE // 1000
     target = min(maximum, max(1000, int(target_ms)) * SAMPLE_RATE // 1000)
@@ -39,15 +40,15 @@ def plan_chunks(audio, vad_segments, target_ms=15000, max_ms=20000,
     start = 0
     overlapping = False
     while start < len(audio):
-        if len(audio) - start <= target:
-            result.append(Chunk(start, len(audio), overlapping))
-            break
-        low = start + max(target * 2 // 3, overlap + 1)
+        low = start + SAMPLE_RATE
         high = min(start + maximum, len(audio))
-        candidates = [p for p in pauses if low <= p <= high]
+        candidates = [p for p in pauses if low <= p <= high and p < len(audio)]
         forced = not candidates
         if candidates:
-            end = min(candidates, key=lambda p: abs(p - start - target))
+            end = candidates[0]
+        elif len(audio) - start <= maximum:
+            result.append(Chunk(start, len(audio), overlapping))
+            break
         else:
             # Avoid searching the whole recording or copying a long waveform.
             radius = SAMPLE_RATE

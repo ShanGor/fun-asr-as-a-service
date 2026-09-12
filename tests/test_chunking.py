@@ -42,6 +42,21 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(chunks[1].start, chunks[0].end)
         self.assertFalse(chunks[1].overlap)
 
+    def test_early_phrase_pauses_are_used_even_in_short_uploads(self):
+        chunks = self.check_coverage(np.ones(12 * SAMPLE_RATE),
+                                     [(0, 3000), (3400, 7000), (7500, 12000)])
+        self.assertEqual([c.end for c in chunks], [3200 * 16, 7250 * 16, 12000 * 16])
+        self.assertFalse(any(c.overlap for c in chunks))
+
+    def test_no_forced_cut_at_target_when_speech_fits_maximum(self):
+        chunks = self.check_coverage(np.ones(19 * SAMPLE_RATE), [(0, 19000)])
+        self.assertEqual(len(chunks), 1)
+
+    def test_brief_gap_does_not_split_phrase(self):
+        chunks = self.check_coverage(np.ones(12 * SAMPLE_RATE),
+                                     [(0, 3000), (3200, 12000)])
+        self.assertEqual(len(chunks), 1)
+
     def test_adversarial_lengths_and_settings(self):
         rng = np.random.default_rng(42)
         for _ in range(80):
@@ -56,11 +71,21 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(reconcile_overlap("very good", "good morning"), "good morning")
         self.assertEqual(reconcile_overlap("yes yes", "yes yes"), "yes yes")
 
+    def test_known_single_singer_bypasses_embedding_and_clustering(self):
+        manager = ModelManager({"device": "cpu"})
+        rows = [{"start": i, "end": i + 1, "text": "song", "speaker": i % 3}
+                for i in range(11)]
+        with patch.object(manager, "speaker_embedding") as embedding:
+            self.assertEqual(manager.assign_speakers(rows, np.zeros(11 * SAMPLE_RATE), 1), 1)
+        embedding.assert_not_called()
+        self.assertEqual([row["speaker"] for row in rows], [0] * 11)
+        self.assertEqual(manager.assign_speakers([], np.zeros(0), 1), 0)
+
     def test_pipeline_processes_every_chunk_including_empty(self):
         manager = ModelManager({"device": "cpu"})
         audio = np.zeros(61 * SAMPLE_RATE + 1)
         with patch.object(manager, "vad_offline_segments", return_value=[(0, 5000)]), \
-             patch.object(manager, "transcribe", side_effect=["first", "", "middle", "more", "last"]) as asr:
+             patch.object(manager, "transcribe", side_effect=["first", "", "middle", "last"]) as asr:
             result = manager.transcribe_with_vad(audio, None, True)
         self.assertEqual(len(result), asr.call_count)
         self.assertGreater(len(result), 3)
@@ -93,10 +118,30 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(regions, [(0, 5000), (60000, 61000)])
         self.assertTrue(all(len(c.kwargs["input"]) <= 30 * SAMPLE_RATE
                             for c in manager._vad.generate.call_args_list))
+        self.assertTrue(all(c.kwargs["max_end_silence_time"] == 300
+                            for c in manager._vad.generate.call_args_list))
         self.check_coverage(audio, regions)
 
 
 class EndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_singer_response(self):
+        from fastapi import UploadFile
+        from funasr_core import server
+        rows = [{"start": 0, "end": 2, "text": "first", "status": "ok"},
+                {"start": 2, "end": 4.204, "text": "last", "status": "ok"}]
+        manager = server.app.state.runtime.manager
+        with open("samples/BAC009S0764W0121.wav", "rb") as source:
+            upload = UploadFile(file=source, filename="sample.wav")
+            with patch.object(manager, "transcribe_with_vad", return_value=rows), \
+                 patch.object(manager, "speaker_embedding") as embedding:
+                response = await server.transcriptions(
+                    upload, language="zh", response_format="verbose_json",
+                    diarize=True, max_speakers=1)
+        body = json.loads(response.body)
+        self.assertEqual(body["speakers"], 1)
+        self.assertEqual([row["speaker"] for row in body["segments"]], [0, 0])
+        embedding.assert_not_called()
+
     async def test_inference_failure_cleans_disk(self):
         from fastapi import UploadFile
         from funasr_core import server

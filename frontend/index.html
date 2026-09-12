@@ -265,8 +265,9 @@ footer a{color:var(--accent);text-decoration:none}
         <div class="field"><label>Speaker diarization</label>
           <label class="switch"><input type="checkbox" id="upDiarize" checked><span class="track"><span class="knob"></span></span><span>on</span></label>
         </div>
-        <div class="field"><label>Max speakers (optional)</label>
-          <input type="number" id="upMaxSpeakers" placeholder="auto" min="2" max="20" style="width:110px">
+        <div class="field"><label>Known speaker count (optional)</label>
+          <input type="number" id="upMaxSpeakers" placeholder="auto" min="1" max="20" style="width:110px" aria-describedby="speakerCountHint">
+          <small id="speakerCountHint">Use 1 for a solo singer or speaker. Blank = automatic.</small>
         </div>
         <div class="field" style="flex:1;justify-content:flex-end"><label>&nbsp;</label>
           <button class="btn" id="transcribeBtn" disabled>

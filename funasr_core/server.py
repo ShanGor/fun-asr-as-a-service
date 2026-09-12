@@ -87,7 +87,7 @@ async def transcriptions(
     response_format: str = Form("json"),
     timestamp_granularities: str = Form("segment"),
     diarize: bool = Form(False),
-    max_speakers: Optional[int] = Form(None),
+    max_speakers: Optional[int] = Form(None, ge=1),
 ):
     state = app.state.runtime
     if file.size is not None and file.size > cfg["max_upload_bytes"]:

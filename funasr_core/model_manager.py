@@ -10,6 +10,7 @@ from funasr import AutoModel
 
 from .audio import SAMPLE_RATE
 from .chunking import plan_chunks, reconcile_overlap
+from .diarization import speaker_windows, label_segments
 
 logger = logging.getLogger("funasr_core")
 
@@ -93,6 +94,7 @@ class ModelManager:
         self._lock = threading.Lock()
         self._vad_inference_lock = threading.Lock()
         self._asr_inference_lock = threading.Lock()
+        self._spk_inference_lock = threading.Lock()
         self._asr = None
         self._vad = None
         self._spk = None
@@ -169,7 +171,9 @@ class ModelManager:
             try:
                 with self._vad_inference_lock:
                     res = self.vad.generate(input=np.array(audio[offset:offset + step]),
-                                            cache={}, is_final=True)
+                                            cache={}, is_final=True,
+                                            max_end_silence_time=max(200, int(
+                                                self.cfg.get("vad_split_silence_ms", 300))))
                 for item in res or []:
                     for s in item.get("value", []):
                         if len(s) >= 2 and 0 <= s[0] < s[1]:
@@ -243,7 +247,8 @@ class ModelManager:
         """Extract one CAM++ speaker embedding for an audio clip."""
         if audio.size < SAMPLE_RATE // 10:  # <100 ms: embedding unreliable
             return None
-        res = self.spk.generate(input=audio)
+        with self._spk_inference_lock:
+            res = self.spk.generate(input=audio)
         if not res:
             return None
         emb = res[0].get("spk_embedding")
@@ -259,24 +264,33 @@ class ModelManager:
         audio: np.ndarray,
         max_speakers: Optional[int] = None,
     ) -> int:
-        """Cluster segments by speaker embedding; set seg["speaker"] in-place.
+        """Cluster independent voice windows; set seg["speaker"] in-place.
 
         Returns the number of distinct speakers found. Falls back to a single
         speaker when embeddings or clustering fail.
         """
         if not segments:
             return 0
+        # A known single voice needs no embedding inference or clustering.
+        # Singing and accompaniment can vary substantially between phrases.
+        if max_speakers == 1:
+            for seg in segments:
+                seg["speaker"] = 0
+            return 1
         embeddings = []
         valid = []
-        for i, seg in enumerate(segments):
-            chunk = audio[int(seg["start"] * SAMPLE_RATE) : int(seg["end"] * SAMPLE_RATE)]
+        windows = speaker_windows(len(audio), self.vad_offline_segments(audio))
+        for start, end in windows:
+            chunk = audio[start:end]
             emb = self.speaker_embedding(chunk)
-            if emb is not None:
+            if emb is not None and np.all(np.isfinite(emb)) and np.linalg.norm(emb) > 0:
                 embeddings.append(emb)
-                valid.append(i)
+                valid.append((start, end))
 
         labels: Optional[List[int]] = None
-        if embeddings:
+        if len(embeddings) == 1:
+            labels = [0]
+        elif embeddings:
             try:
                 from sklearn.cluster import AgglomerativeClustering
 
@@ -291,14 +305,13 @@ class ModelManager:
                 model = AgglomerativeClustering(**kwargs)
                 labels = list(model.fit_predict(x))
             except Exception:
+                logger.exception("Speaker clustering failed; using one speaker")
                 labels = None
 
         for idx, seg in enumerate(segments):
             seg["speaker"] = 0
         if labels is not None:
-            for seg_idx, label in zip(valid, labels):
-                segments[seg_idx]["speaker"] = int(label)
-            return int(len(set(labels))) if labels else 1
+            return label_segments(segments, valid, labels)
         return 1 if segments else 0
 
     # ------------------------------------------------------------ streaming
