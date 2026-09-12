@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FunASR Studio — Realtime & Batch Speech-to-Text</title>
+<style>
+:root{
+  --bg:#0b0f1a; --bg2:#0e1424; --card:rgba(255,255,255,.045); --card2:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.09); --txt:#e8ecf6; --dim:#8b93a7; --accent:#6c8cff;
+  --accent2:#9d6cff; --green:#37d67a; --red:#ff5c6c; --amber:#ffb547;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(157,108,255,.16), transparent 60%),
+    radial-gradient(900px 480px at -10% 110%, rgba(108,140,255,.14), transparent 60%),
+    linear-gradient(180deg,var(--bg),var(--bg2));
+  color:var(--txt); min-height:100vh; padding:24px;
+}
+.shell{max-width:1080px;margin:0 auto}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:12px;font-size:22px;font-weight:700;letter-spacing:.3px}
+.logo .mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 6px 22px rgba(120,110,255,.4)}
+.logo small{display:block;font-size:11px;font-weight:500;color:var(--dim);letter-spacing:1.4px;text-transform:uppercase}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;
+  background:var(--card);border:1px solid var(--border);font-size:12.5px;color:var(--dim)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:.3s}
+.dot.ok{background:var(--green);box-shadow:0 0 10px var(--green)}
+.dot.bad{background:var(--red);box-shadow:0 0 10px var(--red)}
+.endpoint{font-family:var(--mono);font-size:11px;opacity:.85}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:8px;margin-bottom:18px;background:var(--card);border:1px solid var(--border);
+  padding:6px;border-radius:14px;width:max-content;max-width:100%}
+.tab{padding:10px 22px;border-radius:10px;border:0;background:transparent;color:var(--dim);
+  font-size:14px;font-weight:600;cursor:pointer;display:flex;gap:8px;align-items:center;transition:.2s}
+.tab:hover{color:var(--txt)}
+.tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  box-shadow:0 4px 16px rgba(120,110,255,.35)}
+.panel{display:none;animation:fade .25s ease}
+.panel.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ---------- cards ---------- */
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:22px;
+  backdrop-filter:blur(8px);margin-bottom:18px}
+.card h2{font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--txt)}
+.card h2 svg{color:var(--accent)}
+.hint{font-size:12.5px;color:var(--dim);line-height:1.6}
+
+/* ---------- controls ---------- */
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+select,input[type=number]{background:rgba(0,0,0,.3);border:1px solid var(--border);color:var(--txt);
+  padding:8px 12px;border-radius:9px;font-size:13px;outline:none;min-width:110px}
+select:focus,input:focus{border-color:var(--accent)}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.switch input{display:none}
+.track{width:38px;height:22px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;transition:.25s}
+.knob{position:absolute;top:2.5px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;transition:.25s}
+.switch input:checked+.track{background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.switch input:checked+.track .knob{left:18px}
+.switch span{font-size:13px;color:var(--txt)}
+
+/* ---------- mic section ---------- */
+.mic-stage{display:flex;flex-direction:column;align-items:center;padding:26px 0 8px}
+.mic-btn{width:104px;height:104px;border-radius:50%;border:0;cursor:pointer;position:relative;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;
+  box-shadow:0 10px 34px rgba(120,110,255,.45);transition:transform .15s,box-shadow .25s;color:#fff}
+.mic-btn:hover{transform:scale(1.05)}
+.mic-btn.recording{background:linear-gradient(135deg,#ff5c6c,#ff8a5c);box-shadow:0 10px 34px rgba(255,92,108,.45)}
+.mic-btn.recording::before,.mic-btn.recording::after{content:"";position:absolute;inset:-14px;border-radius:50%;
+  border:2px solid rgba(255,92,108,.5);animation:pulse 1.6s ease-out infinite}
+.mic-btn.recording::after{animation-delay:.8s}
+@keyframes pulse{from{transform:scale(.82);opacity:1}to{transform:scale(1.25);opacity:0}}
+.mic-label{margin-top:16px;font-size:14px;font-weight:600;color:var(--dim)}
+.mic-label.rec{color:#ff8590}
+.mic-label .st{color:var(--txt)}
+.rec-stats{display:flex;gap:14px;margin-top:12px;align-items:center;font-size:12.5px;color:var(--dim);min-height:34px}
+.timer{font-family:var(--mono);font-size:16px;color:var(--txt)}
+.vu{width:150px;height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.vu>div{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,var(--green),var(--amber),var(--red));transition:width .08s}
+.silence{display:none;align-items:center;gap:6px;padding:5px 12px;border-radius:99px;
+  background:rgba(255,181,71,.12);border:1px solid rgba(255,181,71,.35);color:var(--amber);font-weight:600}
+.silence.show{display:inline-flex}
+
+/* ---------- transcript ---------- */
+.transcript{margin-top:8px;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding-right:4px}
+.transcript::-webkit-scrollbar{width:8px}
+.transcript::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:8px}
+.utterance{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border-radius:12px;
+  background:var(--card2);border:1px solid var(--border)}
+.utterance .time{font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap;padding-top:2px;min-width:88px}
+.utterance .body{flex:1;font-size:14px;line-height:1.55}
+.utterance.partial{border-style:dashed;opacity:.85}
+.utterance.partial .body{color:var(--accent);animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.55}}
+.empty{padding:30px;text-align:center;color:var(--dim);font-size:13px;border:1px dashed var(--border);border-radius:12px}
+
+/* ---------- upload ---------- */
+.drop{border:2px dashed var(--border);border-radius:16px;padding:38px 20px;text-align:center;cursor:pointer;
+  transition:.2s;background:rgba(255,255,255,.02)}
+.drop:hover,.drop.drag{border-color:var(--accent);background:rgba(108,140,255,.07)}
+.drop .big{font-size:15px;font-weight:600;margin:10px 0 4px}
+.drop .sub{font-size:12px;color:var(--dim)}
+.file-chip{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;
+  background:var(--card2);border:1px solid var(--border);margin-top:12px}
+.file-chip .icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:grid;place-items:center;color:#fff;flex-shrink:0}
+.file-chip .meta{flex:1;min-width:0}
+.file-chip .name{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-chip .info{font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
+  font-size:13.5px;font-weight:600;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  box-shadow:0 5px 18px rgba(120,110,255,.35);transition:.2s}
+.btn:hover{filter:brightness(1.12)}
+.btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.btn.ghost{background:rgba(255,255,255,.08);box-shadow:none;border:1px solid var(--border);color:var(--txt)}
+.btn.ghost:hover{background:rgba(255,255,255,.14)}
+.btn.danger{background:rgba(255,92,108,.15);color:#ff8590;box-shadow:none;border:1px solid rgba(255,92,108,.3)}
+.spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- results ---------- */
+.summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.chip{padding:6px 13px;border-radius:99px;background:var(--card2);border:1px solid var(--border);
+  font-size:12px;color:var(--dim)}
+.chip b{color:var(--txt);font-weight:600}
+.seg{display:flex;gap:12px;align-items:flex-start;padding:12px 15px;border-radius:12px;
+  background:var(--card2);border:1px solid var(--border);margin-bottom:8px}
+.seg .time{font-family:var(--mono);font-size:11px;color:var(--dim);padding-top:3px;min-width:92px;white-space:nowrap}
+.seg .body{flex:1;font-size:14px;line-height:1.6}
+.spk-tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;
+  margin-right:8px;vertical-align:middle}
+.fulltext{padding:14px 16px;border-radius:12px;background:rgba(0,0,0,.25);border:1px solid var(--border);
+  font-size:14px;line-height:1.75;white-space:pre-wrap}
+.details{margin-top:10px}
+details{font-size:12.5px}
+summary{cursor:pointer;color:var(--dim);user-select:none;padding:6px 0}
+summary:hover{color:var(--txt)}
+pre{background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:10px;padding:12px;
+  font-size:11.5px;overflow:auto;max-height:260px;font-family:var(--mono);color:#a8e6a1}
+
+/* ---------- toast ---------- */
+#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(80px);opacity:0;
+  background:#1c2236;border:1px solid var(--border);color:var(--txt);padding:12px 22px;border-radius:12px;
+  font-size:13.5px;box-shadow:0 10px 40px rgba(0,0,0,.5);transition:.3s;z-index:99;max-width:90%}
+#toast.show{transform:translateX(-50%);opacity:1}
+#toast.err{border-color:rgba(255,92,108,.5);color:#ff9aa5}
+
+footer{text-align:center;color:var(--dim);font-size:11.5px;padding:18px 0 6px}
+footer a{color:var(--accent);text-decoration:none}
+@media (max-width:640px){ body{padding:14px} .tab{padding:9px 14px;font-size:13px} .mic-btn{width:88px;height:88px} }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <div class="logo">
+      <div class="mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg>
+      </div>
+      <div>FunASR Studio<small>SenseVoice &middot; FSMN-VAD &middot; CAM++</small></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">checking…</span></div>
+    <div class="pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span class="endpoint" id="endpoint"></span></div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="mic">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg>
+      Realtime Mic
+    </button>
+    <button class="tab" data-tab="upload">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+      File Upload &amp; Diarization
+    </button>
+  </div>
+
+  <!-- ==================== REALTIME ==================== -->
+  <section class="panel active" id="panel-mic">
+    <div class="card">
+      <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>Session options</h2>
+      <div class="row">
+        <div class="field"><label>Language</label>
+          <select id="rtLanguage">
+            <option value="auto">auto</option><option value="zh">中文</option><option value="en">English</option>
+            <option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option>
+          </select>
+        </div>
+        <div class="field"><label>ITN (punctuate)</label>
+          <label class="switch"><input type="checkbox" id="rtItn" checked><span class="track"><span class="knob"></span></span><span>on</span></label>
+        </div>
+        <div class="field"><label>Auto-stop silence</label>
+          <label class="switch"><input type="checkbox" id="rtAutoStop" checked><span class="track"><span class="knob"></span></span><span>on</span></label>
+        </div>
+        <div class="field"><label>Silence limit (s)</label>
+          <input type="number" id="rtSilenceSec" value="10" min="3" max="60" style="width:90px">
+        </div>
+      </div>
+      <p class="hint" style="margin-top:12px">Audio is downsampled to 16 kHz PCM16 and streamed over WebSocket. Partial results refresh every ~0.5 s; each finalized utterance is appended below. With auto-stop enabled, recording ends after the configured number of silent seconds.</p>
+    </div>
+
+    <div class="card">
+      <div class="mic-stage">
+        <button class="mic-btn" id="micBtn" title="Start recording">
+          <svg id="micIcon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg>
+          <svg id="stopIcon" width="34" height="34" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+        <div class="mic-label" id="micLabel"><span class="st">Click the microphone to start realtime transcription</span></div>
+        <div class="rec-stats">
+          <span class="timer" id="rtTimer" style="display:none">00:00</span>
+          <div class="vu" id="vuWrap" style="display:none"><div id="vuBar"></div></div>
+          <span class="silence" id="silenceBadge">⏳ auto-stop in <b id="silenceLeft">10</b>s</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:12px">
+        <h2 style="margin:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Transcript</h2>
+        <div class="row">
+          <button class="btn ghost" id="rtCopy" style="padding:7px 14px;font-size:12px">Copy</button>
+          <button class="btn ghost" id="rtClear" style="padding:7px 14px;font-size:12px">Clear</button>
+        </div>
+      </div>
+      <div class="transcript" id="rtTranscript"><div class="empty">No transcription yet — start recording and speak.</div></div>
+    </div>
+  </section>
+
+  <!-- ==================== UPLOAD ==================== -->
+  <section class="panel" id="panel-upload">
+    <div class="card">
+      <h2><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>Audio file</h2>
+      <div class="drop" id="dropZone">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" stroke-width="1.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+        <div class="big">Drop an audio file here, or click to browse</div>
+        <div class="sub">wav / flac / ogg / mp3 / m4a … (≤ 200 MB)</div>
+        <input type="file" id="fileInput" accept="audio/*,.wav,.flac,.ogg,.mp3,.m4a,.aac,.opus" hidden>
+      </div>
+      <div class="file-chip" id="fileChip" style="display:none">
+        <div class="icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M9 18V6l10-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="15" r="2.5"/></svg></div>
+        <div class="meta"><div class="name" id="fileName"></div><div class="info" id="fileInfo"></div></div>
+        <button class="btn ghost" id="fileRemove" style="padding:6px 12px;font-size:12px">✕</button>
+      </div>
+
+      <div class="row" style="margin-top:18px">
+        <div class="field"><label>Language</label>
+          <select id="upLanguage">
+            <option value="auto">auto</option><option value="zh">中文</option><option value="en">English</option>
+            <option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option>
+          </select>
+        </div>
+        <div class="field"><label>Speaker diarization</label>
+          <label class="switch"><input type="checkbox" id="upDiarize" checked><span class="track"><span class="knob"></span></span><span>on</span></label>
+        </div>
+        <div class="field"><label>Max speakers (optional)</label>
+          <input type="number" id="upMaxSpeakers" placeholder="auto" min="2" max="20" style="width:110px">
+        </div>
+        <div class="field" style="flex:1;justify-content:flex-end"><label>&nbsp;</label>
+          <button class="btn" id="transcribeBtn" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+            Transcribe
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="resultsCard" style="display:none">
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <h2 style="margin:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>Results</h2>
+        <div class="row">
+          <button class="btn ghost" id="copyResult" style="padding:7px 14px;font-size:12px">Copy text</button>
+          <button class="btn ghost" id="dlResult" style="padding:7px 14px;font-size:12px">Download .txt</button>
+        </div>
+      </div>
+      <div class="summary" id="summaryChips"></div>
+      <div id="segmentList"></div>
+      <h2 style="margin-top:18px;font-size:13px">Full text</h2>
+      <div class="fulltext" id="fullText"></div>
+      <div class="details"><details><summary>Raw JSON response</summary><pre id="rawJson"></pre></details></div>
+    </div>
+  </section>
+
+  <footer>
+    Local FunASR inference service &middot; <a href="/docs" target="_blank">API docs</a> &middot; <a href="/health" target="_blank">/health</a>
+  </footer>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================ config */
+const SERVER = (location.protocol.startsWith("http") ? location.origin : "http://127.0.0.1:8000");
+document.getElementById("endpoint").textContent = SERVER.replace(/^https?:\/\//, "");
+const $ = id => document.getElementById(id);
+
+const SPK_COLORS = ["#6c8cff","#37d67a","#ffb547","#ff5c6c","#9d6cff","#3fd4e0","#ff8ac2","#b8e04a","#ff9d5c","#5cd6a2"];
+const spkColor = i => SPK_COLORS[(i % SPK_COLORS.length + SPK_COLORS.length) % SPK_COLORS.length];
+
+function toast(msg, isErr=false){
+  const t = $("toast"); t.textContent = msg; t.className = "show" + (isErr ? " err" : "");
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "", 3200);
+}
+function fmtTime(s){
+  s = Math.max(0, Number(s) || 0);
+  const m = Math.floor(s / 60), sec = (s % 60).toFixed(1).padStart(4, "0");
+  return String(m).padStart(2, "0") + ":" + sec;
+}
+function fmtBytes(b){
+  if (b > 1 << 20) return (b / (1 << 20)).toFixed(1) + " MB";
+  return (b / 1024).toFixed(1) + " KB";
+}
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ============================================================ health */
+async function pollHealth(){
+  const dot = $("statusDot"), txt = $("statusText");
+  try {
+    const r = await fetch(SERVER + "/health", {cache: "no-store"});
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    dot.className = "dot ok";
+    txt.textContent = `online · ${j.device} · ${j.active_ws} ws`;
+  } catch {
+    dot.className = "dot bad"; txt.textContent = "server unreachable";
+  }
+}
+pollHealth(); setInterval(pollHealth, 5000);
+
+/* ============================================================ tabs */
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("active", b === btn));
+    document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + btn.dataset.tab));
+    history.replaceState(null, "", "#" + btn.dataset.tab);
+  };
+});
+// deep link: #mic / #upload
+if (location.hash){
+  const b = document.querySelector('.tab[data-tab="' + location.hash.slice(1) + '"]');
+  if (b) b.click();
+}
+
+/* ============================================================ realtime */
+const rt = {
+  ws: null, stream: null, ctx: null, processor: null, source: null,
+  recording: false, closing: false, pending: [], finalSegments: [],
+  startTs: 0, timerH: null, lastSpeechTs: 0, silenceShown: false,
+};
+const SILENCE_RMS = 0.012;   // client-side voice threshold
+const FRAME = 1600;          // 100 ms @ 16 kHz
+
+function downsample(input, inRate, outRate = 16000){
+  if (inRate === outRate) return input;
+  const ratio = inRate / outRate;
+  const out = new Float32Array(Math.floor(input.length / ratio));
+  for (let i = 0; i < out.length; i++){
+    const idx = i * ratio, j = Math.floor(idx), frac = idx - j;
+    const a = input[j] || 0, b = input[j + 1] ?? a;
+    out[i] = a * (1 - frac) + b * frac;
+  }
+  return out;
+}
+function floatToInt16(f){
+  const s = Math.max(-1, Math.min(1, f));
+  return s < 0 ? s * 0x8000 : s * 0x7FFF;
+}
+
+async function startRecording(){
+  if (rt.recording) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    toast("Microphone unavailable: browsers only allow mic capture on HTTPS or localhost. Open the page via http://127.0.0.1:8000 (or set up HTTPS).", true);
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}
+    });
+  } catch (e) {
+    const name = (e && e.name) || "";
+    let msg;
+    if (name === "NotAllowedError") msg = "Microphone permission denied — click the lock/tune icon in the address bar and allow microphone access, then try again.";
+    else if (name === "NotFoundError") msg = "No microphone device found on this machine.";
+    else if (name === "NotReadableError") msg = "Microphone is in use by another application.";
+    else msg = "Microphone failed: " + (name || e);
+    toast(msg, true); return;
+  }
+  let ws;
+  try {
+    ws = new WebSocket(SERVER.replace(/^http/, "ws") + "/ws");
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  } catch {
+    stream.getTracks().forEach(t => t.stop());
+    toast("WebSocket connect failed", true); return;
+  }
+
+  rt.stream = stream; rt.ws = ws; rt.recording = true; rt.closing = false;
+  rt.pending = []; rt.startTs = performance.now(); rt.lastSpeechTs = performance.now();
+  ws.binaryType = "arraybuffer";
+  ws.send(JSON.stringify({mode: "2pass", language: $("rtLanguage").value, itn: $("rtItn").checked}));
+
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.error) { toast(m.error, true); return; }
+    const ts = (m.timestamp && m.timestamp[0]) || [];
+    if (!m.is_final){
+      showPartial(m.text, ts);
+    } else if (!m.is_end){
+      if (m.text) addFinalSegment(ts[0], ts[1], m.text);
+      clearPartial();
+    } else {
+      clearPartial();
+      onServerEnd();
+    }
+  };
+  ws.onclose = () => { if (rt.recording) stopRecording(true); };
+  ws.onerror = () => { toast("WebSocket error", true); };
+
+  // ---- audio pipeline (AudioWorklet via blob, ScriptProcessor fallback)
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ctx.createMediaStreamSource(stream);
+  rt.ctx = ctx; rt.source = src;
+
+  const onChunk = samples => {
+    if (!rt.recording) return;
+    // client-side silence detection
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+    const rms = Math.sqrt(sum / samples.length);
+    const level = Math.min(1, rms * 6);
+    $("vuBar").style.width = (level * 100).toFixed(0) + "%";
+    if (rms > SILENCE_RMS) rt.lastSpeechTs = performance.now();
+    const limit = Number($("rtSilenceSec").value) || 10;
+    if ($("rtAutoStop").checked){
+      const silentFor = (performance.now() - rt.lastSpeechTs) / 1000;
+      const left = Math.max(0, limit - silentFor);
+      $("silenceBadge").classList.toggle("show", silentFor > 1.2);
+      $("silenceLeft").textContent = left.toFixed(0);
+      if (silentFor >= limit){ toast("Auto-stopped after " + limit + "s of silence"); stopRecording(); return; }
+    }
+    // encode + queue 100 ms frames
+    const pcm = downsample(samples, ctx.sampleRate, 16000);
+    for (let i = 0; i < pcm.length; i++) rt.pending.push(floatToInt16(pcm[i]));
+    while (rt.pending.length >= FRAME){
+      const frame = new Int16Array(FRAME);
+      for (let i = 0; i < FRAME; i++) frame[i] = rt.pending.shift();
+      if (rt.ws.readyState === 1) rt.ws.send(frame.buffer);
+    }
+  };
+
+  let attached = false;
+  const workletCode = `
+    class PCMCapture extends AudioWorkletProcessor {
+      process(inputs){ const ch = inputs[0] && inputs[0][0];
+        if (ch) this.port.postMessage(ch.slice(0)); return true; } }
+    registerProcessor('pcm-capture', PCMCapture);`;
+  try {
+    if (!ctx.audioWorklet) throw 0;
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type: "application/javascript"})));
+    const node = new AudioWorkletNode(ctx, "pcm-capture");
+    node.port.onmessage = e => onChunk(e.data);
+    src.connect(node); node.connect(ctx.destination);
+    rt.processor = node; attached = true;
+  } catch {
+    const sp = ctx.createScriptProcessor(4096, 1, 1);
+    sp.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+    src.connect(sp); sp.connect(ctx.destination);
+    rt.processor = sp; attached = true;
+  }
+  if (!attached) { stopRecording(true); return; }
+
+  // ---- UI state
+  $("micBtn").classList.add("recording");
+  $("micIcon").style.display = "none"; $("stopIcon").style.display = "block";
+  $("micLabel").classList.add("rec");
+  $("micLabel").innerHTML = 'Recording — <span class="st">click again to stop</span>';
+  $("rtTimer").style.display = "inline"; $("vuWrap").style.display = "block";
+  rt.timerH = setInterval(() => {
+    $("rtTimer").textContent = fmtTime((performance.now() - rt.startTs) / 1000).slice(0, 5);
+  }, 250);
+}
+
+function stopRecording(silent = false){
+  if (!rt.recording) return;
+  rt.recording = false;
+  clearInterval(rt.timerH);
+  $("micBtn").classList.remove("recording");
+  $("micIcon").style.display = "block"; $("stopIcon").style.display = "none";
+  $("micLabel").classList.remove("rec");
+  $("micLabel").innerHTML = '<span class="st">Finished — click the microphone to start a new session</span>';
+  $("silenceBadge").classList.remove("show");
+  $("vuBar").style.width = "0%";
+  try { rt.processor && rt.processor.disconnect(); } catch {}
+  try { rt.source && rt.source.disconnect(); } catch {}
+  try { rt.ctx && rt.ctx.close(); } catch {}
+  try { rt.stream && rt.stream.getTracks().forEach(t => t.stop()); } catch {}
+  if (rt.ws && rt.ws.readyState === 1){
+    try { rt.ws.send(JSON.stringify({is_speaking: false, is_end: true})); } catch {}
+    rt.closing = true;
+    setTimeout(() => { try { rt.ws.close(); } catch {} }, 4000);
+  } else if (rt.ws) { try { rt.ws.close(); } catch {} }
+  if (!silent) toast("Recording stopped");
+}
+function onServerEnd(){
+  if (rt.ws) { try { rt.ws.close(); } catch {} rt.ws = null; }
+}
+$("micBtn").onclick = () => (rt.recording ? stopRecording() : startRecording());
+
+/* ---------- realtime transcript rendering */
+function transcriptBox(){ return $("rtTranscript"); }
+function ensureNotEmptyBox(){
+  const box = transcriptBox();
+  const empty = box.querySelector(".empty"); if (empty) empty.remove();
+}
+function showPartial(text, ts){
+  if (!text) return;
+  ensureNotEmptyBox();
+  const box = transcriptBox();
+  let el = box.querySelector(".partial");
+  if (!el){
+    el = document.createElement("div");
+    el.className = "utterance partial";
+    el.innerHTML = '<div class="time"></div><div class="body"></div>';
+    box.appendChild(el);
+  }
+  el.querySelector(".time").textContent = ts.length ? fmtTime(ts[0]) + " →" : "…";
+  el.querySelector(".body").textContent = text;
+  box.scrollTop = box.scrollHeight;
+}
+function clearPartial(){ const p = transcriptBox().querySelector(".partial"); if (p) p.remove(); }
+function addFinalSegment(start, end, text){
+  ensureNotEmptyBox();
+  rt.finalSegments.push({start, end, text});
+  const box = transcriptBox();
+  const el = document.createElement("div");
+  el.className = "utterance";
+  el.innerHTML = `<div class="time">${fmtTime(start ?? 0)} – ${fmtTime(end ?? 0)}</div><div class="body">${escapeHtml(text)}</div>`;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+$("rtClear").onclick = () => {
+  rt.finalSegments = []; clearPartial();
+  transcriptBox().innerHTML = '<div class="empty">No transcription yet — start recording and speak.</div>';
+};
+$("rtCopy").onclick = async () => {
+  const t = rt.finalSegments.map(s => `[${fmtTime(s.start)}–${fmtTime(s.end)}] ${s.text}`).join("\n");
+  if (!t) { toast("Nothing to copy", true); return; }
+  try { await navigator.clipboard.writeText(t); toast("Transcript copied"); }
+  catch { toast("Copy failed", true); }
+};
+
+/* ============================================================ upload */
+let pickedFile = null;
+const drop = $("dropZone");
+drop.onclick = () => $("fileInput").click();
+["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("drag"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) pickFile(f); });
+$("fileInput").onchange = e => { const f = e.target.files[0]; if (f) pickFile(f); };
+$("fileRemove").onclick = () => { pickedFile = null; refreshFileUI(); };
+
+function pickFile(f){
+  if (f.size > 200 * 1024 * 1024) { toast("File exceeds 200 MB limit", true); return; }
+  pickedFile = f; refreshFileUI();
+}
+function refreshFileUI(){
+  const chip = $("fileChip");
+  if (!pickedFile){ chip.style.display = "none"; $("transcribeBtn").disabled = true; return; }
+  chip.style.display = "flex";
+  $("fileName").textContent = pickedFile.name;
+  $("fileInfo").textContent = `${fmtBytes(pickedFile.size)} · ${pickedFile.type || "audio"}`;
+  $("transcribeBtn").disabled = false;
+}
+
+$("transcribeBtn").onclick = async () => {
+  if (!pickedFile) return;
+  const btn = $("transcribeBtn");
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Transcribing…';
+
+  const fd = new FormData();
+  fd.append("file", pickedFile);
+  fd.append("model", "sensevoice");
+  fd.append("response_format", "verbose_json");
+  if ($("upLanguage").value !== "auto") fd.append("language", $("upLanguage").value);
+  fd.append("diarize", $("upDiarize").checked ? "true" : "false");
+  const ms = $("upMaxSpeakers").value;
+  if (ms) fd.append("max_speakers", ms);
+
+  const t0 = performance.now();
+  try {
+    const r = await fetch(SERVER + "/v1/audio/transcriptions", {method: "POST", body: fd});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
+    renderResults(j, (performance.now() - t0) / 1000);
+  } catch (e) {
+    toast("Transcription failed: " + e.message, true);
+  } finally {
+    btn.disabled = false; btn.innerHTML = orig;
+  }
+};
+
+function renderResults(j, wallSec){
+  $("resultsCard").style.display = "block";
+  const segs = j.segments || [];
+  const chips = [
+    `<span class="chip">Duration <b>${fmtTime(j.duration)}</b></span>`,
+    `<span class="chip">Language <b>${escapeHtml(j.language || "auto")}</b></span>`,
+    `<span class="chip">Segments <b>${segs.length}</b></span>`,
+  ];
+  if (j.speakers != null) chips.push(`<span class="chip">Speakers <b>${j.speakers}</b></span>`);
+  chips.push(`<span class="chip">Wall time <b>${wallSec.toFixed(2)}s</b></span>`);
+  $("summaryChips").innerHTML = chips.join("");
+
+  const hasSpk = segs.some(s => s.speaker != null);
+  $("segmentList").innerHTML = segs.length ? segs.map(s => {
+    const tag = hasSpk
+      ? `<span class="spk-tag" style="background:${spkColor(s.speaker)}22;color:${spkColor(s.speaker)};border:1px solid ${spkColor(s.speaker)}55">Speaker ${s.speaker + 1}</span>`
+      : "";
+    return `<div class="seg"><div class="time">${fmtTime(s.start)} – ${fmtTime(s.end)}</div>
+      <div class="body">${tag}${escapeHtml(s.text)}</div></div>`;
+  }).join("") : '<div class="empty">No speech detected.</div>';
+
+  $("fullText").textContent = j.text || "(empty)";
+  $("rawJson").textContent = JSON.stringify(j, null, 2);
+  $("resultsCard").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+$("copyResult").onclick = async () => {
+  const txt = $("fullText").textContent;
+  if (!txt || txt === "(empty)") { toast("Nothing to copy", true); return; }
+  try { await navigator.clipboard.writeText(txt); toast("Text copied"); }
+  catch { toast("Copy failed", true); }
+};
+$("dlResult").onclick = () => {
+  const txt = $("fullText").textContent || "";
+  const blob = new Blob([txt], {type: "text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (pickedFile ? pickedFile.name.replace(/\.[^.]+$/, "") : "transcript") + ".txt";
+  a.click(); URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>

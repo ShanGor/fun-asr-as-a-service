@@ -1,0 +1,29 @@
+[Unit]
+Description=FunASR core inference service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sam
+WorkingDirectory=/home/sam/ai/fun-asr
+ExecStart=/home/sam/ai/fun-asr/scripts/run_server.sh
+Restart=always
+RestartSec=5
+
+# offline runtime: never reach the network
+Environment=FUNASR_HOST=127.0.0.1
+Environment=FUNASR_PORT=8000
+Environment=FUNASR_DEVICE=cuda
+Environment=FUNASR_OFFLINE=1
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=MODELSCOPE_CACHE=/home/sam/ai/fun-asr/models/.modelscope-cache
+
+# stability guards
+LimitNOFILE=65535
+MemoryMax=32G
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

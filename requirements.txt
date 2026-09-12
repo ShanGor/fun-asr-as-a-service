@@ -1,0 +1,11 @@
+torch==2.11.0+cu128
+torchaudio==2.11.0+cu128
+funasr
+modelscope
+fastapi
+uvicorn[standard]
+python-multipart
+soundfile
+pyyaml
+websockets
+scikit-learn
