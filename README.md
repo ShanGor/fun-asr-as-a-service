@@ -75,6 +75,14 @@ c = OpenAI(base_url='http://127.0.0.1:8000/v1', api_key='none')
 print(c.audio.transcriptions.create(model='sensevoice', file=open('samples/BAC009S0764W0121.wav','rb')).text)"
 ```
 
+For a remote realtime browser test, start the server with the generated
+self-signed certificate in a separate run:
+
+```bash
+./scripts/run_server.sh --https --host 0.0.0.0 --port 8443
+# open https://<server-ip>:8443/ in a browser
+```
+
 The default server uses SenseVoiceSmall. To compare the larger public
 Fun-ASR-Nano checkpoint, start a second instance on another port:
 
@@ -198,6 +206,9 @@ single-utterance files always return `speakers: 1`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `FUNASR_HOST` / `FUNASR_PORT` | `127.0.0.1` / `8000` | bind address |
+| `FUNASR_SSL_CERTFILE` | empty | PEM certificate; enables HTTPS when paired with the key |
+| `FUNASR_SSL_KEYFILE` | empty | PEM private key; must be paired with the certificate |
+| `FUNASR_SSL_KEYFILE_PASSWORD` | empty | optional password for the private key |
 | `FUNASR_DEVICE` | `cuda` on Linux / `mps` on arm64 macOS | `cuda`, `mps` (Apple Silicon), or `cpu` |
 | `FUNASR_ASR_MODEL` | `models/SenseVoiceSmall` | local model dir, or `Fun-ASR-Nano-2512` |
 | `FUNASR_ASR_HUB` | `ms` | model hub for custom ASR checkpoints |
@@ -313,3 +324,51 @@ PyTorch wheels rather than the CUDA index.
 4. Run several transcriptions in parallel; watch `nvidia-smi` and latency
 5. WS smoke: stream the same wav as PCM16, confirm partial then final messages
 6. From an untrusted host, confirm `:8000` is unreachable (gateway-only access)
+
+---
+## How to start it with HTTPs:
+```
+Start with the generated certificate:
+
+./scripts/run_server.sh \
+--https \
+--host 0.0.0.0 \
+--port 8443
+
+This uses:
+
+deploy/tls/fullchain.pem
+deploy/tls/privkey.pem
+
+Open remotely:
+
+https://192.168.163.189:8443/
+
+Available options:
+
+--https
+--host HOST
+--port PORT
+--ssl-certfile FILE
+--ssl-keyfile FILE
+
+Explicit certificate paths:
+
+./scripts/run_server.sh \
+--host 0.0.0.0 \
+--port 8443 \
+--ssl-certfile deploy/tls/fullchain.pem \
+--ssl-keyfile deploy/tls/privkey.pem
+
+Environment-variable equivalent:
+
+FUNASR_HOST=0.0.0.0 \
+FUNASR_PORT=8443 \
+FUNASR_SSL_CERTFILE=deploy/tls/fullchain.pem \
+FUNASR_SSL_KEYFILE=deploy/tls/privkey.pem \
+./scripts/run_server.sh
+
+Because the certificate is self-signed, accept the browser warning. You may test health with:
+
+curl -k https://192.168.163.189:8443/health
+```

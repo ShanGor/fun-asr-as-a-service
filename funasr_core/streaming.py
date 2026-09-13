@@ -198,7 +198,14 @@ class WSSession:
             if self.vad_feeder:
                 frame = b"".join(self.vad_feeder)
                 self.vad_feeder = []
-                await self._vad(frame, is_final=True)
+                start_ms, _ = await self._vad(frame, is_final=True)
+                # The final VAD call can be the first call that confirms a
+                # short utterance. Preserve it instead of ending with an
+                # empty transcript when the user stops quickly.
+                if start_ms != -1 and not self.speech_started:
+                    self.speech_started = True
+                    self.seg_start_ms = max(0, self.elapsed_ms - _pcm_duration_ms(frame))
+                    self.speech_frames = [frame]
         except Exception:
             pass
         if self.speech_started:

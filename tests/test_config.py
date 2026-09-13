@@ -23,6 +23,18 @@ class DeviceConfigTests(unittest.TestCase):
              patch.dict(os.environ, {"FUNASR_DEVICE": "cpu"}, clear=True):
             self.assertEqual(config.load_config()["device"], "cpu")
 
+    def test_https_settings_are_loaded(self):
+        env = {
+            "FUNASR_SSL_CERTFILE": "/tmp/cert.pem",
+            "FUNASR_SSL_KEYFILE": "/tmp/key.pem",
+            "FUNASR_SSL_KEYFILE_PASSWORD": "secret",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            loaded = config.load_config()
+        self.assertEqual(loaded["ssl_certfile"], "/tmp/cert.pem")
+        self.assertEqual(loaded["ssl_keyfile"], "/tmp/key.pem")
+        self.assertEqual(loaded["ssl_keyfile_password"], "secret")
+
 
 if __name__ == "__main__":
     unittest.main()

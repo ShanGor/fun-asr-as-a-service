@@ -235,13 +235,26 @@ async def _handle_text(websocket: WebSocket, session: WSSession, text: str) -> b
 def main():
     import uvicorn
 
-    uvicorn.run(
-        "funasr_core.server:app",
-        host=cfg["host"],
-        port=cfg["port"],
-        ws="websockets-sansio",
-        log_level=cfg["log_level"].lower(),
-    )
+    uvicorn_options = {
+        "host": cfg["host"],
+        "port": cfg["port"],
+        "ws": "websockets-sansio",
+        "log_level": cfg["log_level"].lower(),
+    }
+
+    certfile = cfg.get("ssl_certfile", "")
+    keyfile = cfg.get("ssl_keyfile", "")
+    if bool(certfile) != bool(keyfile):
+        raise ValueError("FUNASR_SSL_CERTFILE and FUNASR_SSL_KEYFILE must be set together")
+    if certfile:
+        for label, filename in (("certificate", certfile), ("private key", keyfile)):
+            if not Path(filename).is_file():
+                raise FileNotFoundError(f"HTTPS {label} does not exist: {filename}")
+        uvicorn_options.update(ssl_certfile=certfile, ssl_keyfile=keyfile)
+        if cfg.get("ssl_keyfile_password"):
+            uvicorn_options["ssl_keyfile_password"] = cfg["ssl_keyfile_password"]
+
+    uvicorn.run("funasr_core.server:app", **uvicorn_options)
 
 
 if __name__ == "__main__":

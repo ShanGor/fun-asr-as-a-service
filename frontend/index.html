@@ -360,11 +360,47 @@ if (location.hash){
 /* ============================================================ realtime */
 const rt = {
   ws: null, stream: null, ctx: null, processor: null, source: null,
-  recording: false, closing: false, pending: [], finalSegments: [],
+  state: "idle", recording: false, sessionId: 0, startId: 0, closingSocket: null,
+  pending: [], finalSegments: [],
   startTs: 0, timerH: null, lastSpeechTs: 0, silenceShown: false,
 };
 const SILENCE_RMS = 0.012;   // client-side voice threshold
 const FRAME = 1600;          // 100 ms @ 16 kHz
+
+function isCurrentStart(id){ return rt.state === "starting" && rt.startId === id; }
+
+function resetMicUI(message = "Click the microphone to start realtime transcription"){
+  clearInterval(rt.timerH); rt.timerH = null;
+  $("micBtn").classList.remove("recording");
+  $("micBtn").title = "Start recording";
+  $("micIcon").style.display = "block"; $("stopIcon").style.display = "none";
+  $("micLabel").classList.remove("rec");
+  $("micLabel").innerHTML = `<span class="st">${message}</span>`;
+  $("rtTimer").style.display = "none";
+  $("vuWrap").style.display = "none";
+  $("silenceBadge").classList.remove("show");
+  $("vuBar").style.width = "0%";
+}
+
+function releaseAudio(){
+  try { rt.processor && rt.processor.disconnect(); } catch {}
+  try { rt.source && rt.source.disconnect(); } catch {}
+  try { rt.ctx && rt.ctx.close(); } catch {}
+  try { rt.stream && rt.stream.getTracks().forEach(t => t.stop()); } catch {}
+  rt.processor = rt.source = rt.ctx = rt.stream = null;
+  rt.pending = [];
+}
+
+function closeSocket(socket, signalEnd = false){
+  if (!socket) return;
+  if (signalEnd && socket.readyState === 1){
+    try { socket.send(JSON.stringify({is_speaking: false, is_end: true})); } catch {}
+    // Capture this socket: a later session must never be closed by an old timer.
+    setTimeout(() => { try { socket.close(); } catch {} }, 4000);
+  } else {
+    try { socket.close(); } catch {}
+  }
+}
 
 function downsample(input, inRate, outRate = 16000){
   if (inRate === outRate) return input;
@@ -383,9 +419,31 @@ function floatToInt16(f){
 }
 
 async function startRecording(){
-  if (rt.recording) return;
+  if (rt.state !== "idle") return;
+  const startId = ++rt.startId;
+  rt.state = "starting";
+  $("micBtn").title = "Cancel startup";
+  $("micLabel").innerHTML = '<span class="st">Starting realtime transcription — click again to cancel</span>';
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    rt.state = "idle";
+    resetMicUI();
     toast("Microphone unavailable: browsers only allow mic capture on HTTPS or localhost. Open the page via http://127.0.0.1:8000 (or set up HTTPS).", true);
+    return;
+  }
+  let ctx;
+  let contextReady = Promise.resolve();
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("Audio capture is not supported by this browser");
+    // Create/resume synchronously from the click handler. If this is delayed
+    // until after getUserMedia/WebSocket awaits, autoplay policy can suspend
+    // the context and the browser will produce no audio callbacks at all.
+    ctx = new AudioContextClass();
+    rt.ctx = ctx;
+    if (ctx.state === "suspended") contextReady = ctx.resume();
+  } catch (e) {
+    rt.state = "idle"; resetMicUI();
+    toast(e.message || "Audio capture is not supported by this browser", true);
     return;
   }
   let stream;
@@ -400,23 +458,55 @@ async function startRecording(){
     else if (name === "NotFoundError") msg = "No microphone device found on this machine.";
     else if (name === "NotReadableError") msg = "Microphone is in use by another application.";
     else msg = "Microphone failed: " + (name || e);
+    if (isCurrentStart(startId)) { rt.state = "idle"; releaseAudio(); resetMicUI(); }
+    else return;
     toast(msg, true); return;
   }
+  if (!isCurrentStart(startId)){
+    stream.getTracks().forEach(t => t.stop());
+    return;
+  }
+  rt.stream = stream;
+
   let ws;
   try {
     ws = new WebSocket(SERVER.replace(/^http/, "ws") + "/ws");
-    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-  } catch {
-    stream.getTracks().forEach(t => t.stop());
-    toast("WebSocket connect failed", true); return;
+    rt.ws = ws;
+    await new Promise((res, rej) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true; clearTimeout(timeout);
+        fn(value);
+      };
+      const timeout = setTimeout(() => finish(rej, new Error("WebSocket connection timed out")), 10000);
+      ws.onopen = () => finish(res);
+      ws.onerror = () => finish(rej, new Error("WebSocket connection failed"));
+      ws.onclose = () => finish(rej, new Error("WebSocket connection closed"));
+    });
+    if (!isCurrentStart(startId)) { closeSocket(ws); return; }
+  } catch (e) {
+    if (isCurrentStart(startId)){
+      rt.startId++;
+      rt.state = "idle"; rt.recording = false;
+      const socket = rt.ws; rt.ws = null;
+      releaseAudio(); closeSocket(socket);
+      resetMicUI();
+      toast(e.message || "WebSocket connect failed", true);
+    } else {
+      stream.getTracks().forEach(t => t.stop());
+      closeSocket(ws);
+    }
+    return;
   }
 
-  rt.stream = stream; rt.ws = ws; rt.recording = true; rt.closing = false;
   rt.pending = []; rt.startTs = performance.now(); rt.lastSpeechTs = performance.now();
   ws.binaryType = "arraybuffer";
-  ws.send(JSON.stringify({mode: "2pass", language: $("rtLanguage").value, itn: $("rtItn").checked}));
 
   ws.onmessage = ev => {
+    const isCurrent = rt.sessionId === startId;
+    const isFinishing = rt.state === "idle" && rt.closingSocket === ws;
+    if (!isCurrent && !isFinishing) return;
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.error) { toast(m.error, true); return; }
     const ts = (m.timestamp && m.timestamp[0]) || [];
@@ -427,101 +517,125 @@ async function startRecording(){
       clearPartial();
     } else {
       clearPartial();
-      onServerEnd();
+      if (isCurrent) onServerEnd();
+      else { rt.closingSocket = null; closeSocket(ws); }
     }
   };
-  ws.onclose = () => { if (rt.recording) stopRecording(true); };
-  ws.onerror = () => { toast("WebSocket error", true); };
+  ws.onclose = () => {
+    if (rt.closingSocket === ws) rt.closingSocket = null;
+    if (rt.sessionId === startId && rt.state !== "idle") stopRecording(true);
+  };
+  ws.onerror = () => { if (rt.sessionId === startId) toast("WebSocket error", true); };
 
   // ---- audio pipeline (AudioWorklet via blob, ScriptProcessor fallback)
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const src = ctx.createMediaStreamSource(stream);
-  rt.ctx = ctx; rt.source = src;
+  try {
+    await contextReady;
+    if (ctx.state === "suspended") await ctx.resume();
+    const src = ctx.createMediaStreamSource(stream);
+    rt.source = src;
+    if (!isCurrentStart(startId)) { closeSocket(ws); return; }
 
-  const onChunk = samples => {
-    if (!rt.recording) return;
-    // client-side silence detection
-    let sum = 0;
-    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    const rms = Math.sqrt(sum / samples.length);
-    const level = Math.min(1, rms * 6);
-    $("vuBar").style.width = (level * 100).toFixed(0) + "%";
-    if (rms > SILENCE_RMS) rt.lastSpeechTs = performance.now();
-    const limit = Number($("rtSilenceSec").value) || 10;
-    if ($("rtAutoStop").checked){
-      const silentFor = (performance.now() - rt.lastSpeechTs) / 1000;
-      const left = Math.max(0, limit - silentFor);
-      $("silenceBadge").classList.toggle("show", silentFor > 1.2);
-      $("silenceLeft").textContent = left.toFixed(0);
-      if (silentFor >= limit){ toast("Auto-stopped after " + limit + "s of silence"); stopRecording(); return; }
-    }
-    // encode + queue 100 ms frames
-    const pcm = downsample(samples, ctx.sampleRate, 16000);
-    for (let i = 0; i < pcm.length; i++) rt.pending.push(floatToInt16(pcm[i]));
-    while (rt.pending.length >= FRAME){
-      const frame = new Int16Array(FRAME);
-      for (let i = 0; i < FRAME; i++) frame[i] = rt.pending.shift();
-      if (rt.ws.readyState === 1) rt.ws.send(frame.buffer);
-    }
-  };
+    const onChunk = samples => {
+      if (rt.state !== "recording" || rt.sessionId !== startId) return;
+      // client-side silence detection
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+      const rms = Math.sqrt(sum / samples.length);
+      const level = Math.min(1, rms * 6);
+      $("vuBar").style.width = (level * 100).toFixed(0) + "%";
+      if (rms > SILENCE_RMS) rt.lastSpeechTs = performance.now();
+      const limit = Number($("rtSilenceSec").value) || 10;
+      if ($("rtAutoStop").checked){
+        const silentFor = (performance.now() - rt.lastSpeechTs) / 1000;
+        const left = Math.max(0, limit - silentFor);
+        $("silenceBadge").classList.toggle("show", silentFor > 1.2);
+        $("silenceLeft").textContent = left.toFixed(0);
+        if (silentFor >= limit){ toast("Auto-stopped after " + limit + "s of silence"); stopRecording(); return; }
+      }
+      // encode + queue 100 ms frames
+      const pcm = downsample(samples, ctx.sampleRate, 16000);
+      for (let i = 0; i < pcm.length; i++) rt.pending.push(floatToInt16(pcm[i]));
+      while (rt.pending.length >= FRAME){
+        const frame = new Int16Array(FRAME);
+        for (let i = 0; i < FRAME; i++) frame[i] = rt.pending.shift();
+        const socket = rt.ws;
+        if (socket && socket.readyState === 1) socket.send(frame.buffer);
+      }
+    };
 
-  let attached = false;
-  const workletCode = `
+    let attached = false;
+    const workletCode = `
     class PCMCapture extends AudioWorkletProcessor {
       process(inputs){ const ch = inputs[0] && inputs[0][0];
         if (ch) this.port.postMessage(ch.slice(0)); return true; } }
     registerProcessor('pcm-capture', PCMCapture);`;
-  try {
-    if (!ctx.audioWorklet) throw 0;
-    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type: "application/javascript"})));
-    const node = new AudioWorkletNode(ctx, "pcm-capture");
-    node.port.onmessage = e => onChunk(e.data);
-    src.connect(node); node.connect(ctx.destination);
-    rt.processor = node; attached = true;
-  } catch {
-    const sp = ctx.createScriptProcessor(4096, 1, 1);
-    sp.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
-    src.connect(sp); sp.connect(ctx.destination);
-    rt.processor = sp; attached = true;
-  }
-  if (!attached) { stopRecording(true); return; }
+    try {
+      if (!ctx.audioWorklet) throw 0;
+      const moduleUrl = URL.createObjectURL(new Blob([workletCode], {type: "application/javascript"}));
+      try {
+        await ctx.audioWorklet.addModule(moduleUrl);
+      } finally {
+        URL.revokeObjectURL(moduleUrl);
+      }
+      const node = new AudioWorkletNode(ctx, "pcm-capture");
+      node.port.onmessage = e => onChunk(e.data);
+      src.connect(node); node.connect(ctx.destination);
+      rt.processor = node; attached = true;
+    } catch {
+      const sp = ctx.createScriptProcessor(4096, 1, 1);
+      sp.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+      src.connect(sp); sp.connect(ctx.destination);
+      rt.processor = sp; attached = true;
+    }
+    if (!attached || !isCurrentStart(startId)) { closeSocket(ws); return; }
 
-  // ---- UI state
-  $("micBtn").classList.add("recording");
-  $("micIcon").style.display = "none"; $("stopIcon").style.display = "block";
-  $("micLabel").classList.add("rec");
-  $("micLabel").innerHTML = 'Recording — <span class="st">click again to stop</span>';
-  $("rtTimer").style.display = "inline"; $("vuWrap").style.display = "block";
-  rt.timerH = setInterval(() => {
-    $("rtTimer").textContent = fmtTime((performance.now() - rt.startTs) / 1000).slice(0, 5);
-  }, 250);
+    // Mark the session active only after the complete audio pipeline is ready.
+    rt.sessionId = startId;
+    rt.recording = true; rt.state = "recording";
+    $("micBtn").classList.add("recording");
+    $("micBtn").title = "Stop recording";
+    $("micIcon").style.display = "none"; $("stopIcon").style.display = "block";
+    $("micLabel").classList.add("rec");
+    $("micLabel").innerHTML = 'Recording — <span class="st">click again to stop</span>';
+    $("rtTimer").style.display = "inline"; $("vuWrap").style.display = "block";
+    rt.timerH = setInterval(() => {
+      $("rtTimer").textContent = fmtTime((performance.now() - rt.startTs) / 1000).slice(0, 5);
+    }, 250);
+    ws.send(JSON.stringify({mode: "2pass", language: $("rtLanguage").value, itn: $("rtItn").checked}));
+  } catch (e) {
+    if (isCurrentStart(startId)){
+      rt.startId++;
+      rt.state = "idle"; rt.recording = false;
+      const socket = rt.ws; rt.ws = null;
+      releaseAudio(); closeSocket(socket);
+      resetMicUI();
+      toast(e.message || "Audio capture failed", true);
+    } else {
+      stream.getTracks().forEach(t => t.stop());
+      closeSocket(ws);
+    }
+  }
 }
 
 function stopRecording(silent = false){
-  if (!rt.recording) return;
-  rt.recording = false;
-  clearInterval(rt.timerH);
-  $("micBtn").classList.remove("recording");
-  $("micIcon").style.display = "block"; $("stopIcon").style.display = "none";
-  $("micLabel").classList.remove("rec");
-  $("micLabel").innerHTML = '<span class="st">Finished — click the microphone to start a new session</span>';
-  $("silenceBadge").classList.remove("show");
-  $("vuBar").style.width = "0%";
-  try { rt.processor && rt.processor.disconnect(); } catch {}
-  try { rt.source && rt.source.disconnect(); } catch {}
-  try { rt.ctx && rt.ctx.close(); } catch {}
-  try { rt.stream && rt.stream.getTracks().forEach(t => t.stop()); } catch {}
-  if (rt.ws && rt.ws.readyState === 1){
-    try { rt.ws.send(JSON.stringify({is_speaking: false, is_end: true})); } catch {}
-    rt.closing = true;
-    setTimeout(() => { try { rt.ws.close(); } catch {} }, 4000);
-  } else if (rt.ws) { try { rt.ws.close(); } catch {} }
+  if (rt.state === "idle") return;
+  ++rt.startId; // invalidate any in-flight getUserMedia/WebSocket/audio setup
+  const sessionId = rt.sessionId;
+  rt.state = "idle"; rt.recording = false; rt.sessionId = 0;
+  const socket = rt.ws; rt.ws = null;
+  rt.closingSocket = sessionId ? socket : null;
+  releaseAudio();
+  resetMicUI("Finished — click the microphone to start a new session");
+  closeSocket(socket, true);
   if (!silent) toast("Recording stopped");
 }
+
 function onServerEnd(){
-  if (rt.ws) { try { rt.ws.close(); } catch {} rt.ws = null; }
+  // A server-side end (for example after a protocol error) must reset the
+  // client too; otherwise the button stays red with no live socket behind it.
+  if (rt.state !== "idle") stopRecording(true);
 }
-$("micBtn").onclick = () => (rt.recording ? stopRecording() : startRecording());
+$("micBtn").onclick = () => (rt.state === "idle" ? startRecording() : stopRecording());
 
 /* ---------- realtime transcript rendering */
 function transcriptBox(){ return $("rtTranscript"); }

@@ -197,6 +197,23 @@ class EndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1].args[0][-32:], pcm[-32:])
         self.assertTrue(all(len(c.args[0]) <= 20 * SAMPLE_RATE * 2 for c in calls))
 
+    async def test_realtime_finish_commits_speech_found_by_final_vad(self):
+        from funasr_core.streaming import WSSession
+        from unittest.mock import AsyncMock
+        manager = ModelManager({"device": "cpu"})
+        session = WSSession(manager, None, asyncio.Semaphore(1), asyncio.Semaphore(1), {})
+        pcm = np.ones(1600, dtype=np.int16).tobytes()
+        session.vad_feeder = [pcm]
+        session.elapsed_ms = 100
+        session._vad = AsyncMock(return_value=(0, -1))
+        session._asr = AsyncMock(return_value="short speech")
+
+        messages = await session.finish()
+
+        self.assertEqual(messages[-2]["text"], "short speech")
+        self.assertFalse(messages[-2]["is_end"])
+        self.assertTrue(messages[-1]["is_end"])
+
 
 if __name__ == "__main__":
     unittest.main()

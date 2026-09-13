@@ -4,3 +4,6 @@
 /models/
 /wheels/
 /wheels-macos/
+
+# Local development TLS material (private key and self-signed certificate)
+/deploy/tls/
