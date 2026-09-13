@@ -1,4 +1,6 @@
 /.idea/
 /.venv/
+/.venv-*/
 /models/
 /wheels/
+/wheels-macos/

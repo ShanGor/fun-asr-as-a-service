@@ -1,7 +1,8 @@
 # FunASR Core — local, offline-capable ASR inference service
 
-Self-contained speech-to-text service for a single NVIDIA GPU host
-(tested on RTX 5080 / 16 GB, Blackwell sm_120, torch 2.11 + cu128).
+Self-contained speech-to-text service for a single NVIDIA GPU or Apple
+Silicon host. The original deployment is tested on an RTX 5080 / 16 GB
+(Blackwell sm_120, torch 2.11 + cu128); Apple Silicon uses PyTorch MPS.
 
 - **Default ASR**: SenseVoiceSmall (234M parameters; multilingual speech, emotion and event tags stripped)
 - **Optional larger ASR**: Fun-ASR-Nano-2512 (800M parameters; Chinese, English, Japanese and Chinese dialects)
@@ -10,7 +11,7 @@ Self-contained speech-to-text service for a single NVIDIA GPU host
 - **HTTP API**: OpenAI-compatible `POST /v1/audio/transcriptions`, `GET /health`, `GET /v1/models`
 - **Realtime WebSocket**: `WS /ws`, PCM16 mono 16 kHz in, partial + final results out
 - **Test UI**: self-contained web page served at `GET /` (mic realtime + upload/diarization)
-- **Offline deployment**: models bundled in `models/`, wheels bundled in `wheels/` — the server performs **no network access at runtime**
+- **Offline deployment**: models bundled in `models/`, platform-specific wheels bundled in `wheels/` or `wheels-macos/` — the server performs **no network access at runtime**
 
 The app binds to `127.0.0.1` and has **no authentication**. Put a gateway
 (nginx/Caddy) in front of it for TLS, auth, upload and rate limits — see
@@ -31,15 +32,20 @@ fun-asr/
 │   └── index.html          # self-contained test UI (realtime mic, upload, diarization)
 ├── scripts/
 │   ├── download_models.py  # run once with network: fills ./models
-│   ├── download_wheels.sh  # run once with network: fills ./wheels
-│   ├── install_offline.sh  # run on the server: creates .venv from ./wheels
+│   ├── download_wheels.sh  # run once with network: fills platform wheels
+│   ├── install_macos.sh    # networked Apple Silicon install + model download
+│   ├── install_offline.sh  # creates .venv from platform wheels
+│   ├── run_macos.sh        # starts the server with MPS on Apple Silicon
 │   └── run_server.sh       # starts the server (sets offline env)
 ├── deploy/
 │   ├── funasr-core.service # systemd unit (Restart=always)
 │   └── nginx.conf.example  # sample gateway config
 ├── models/                 # bundled model weights and optional Fun-ASR-Nano assets
-├── wheels/                 # bundled pip wheels for offline install
-└── requirements-lock.txt   # exact pinned environment
+├── wheels/                 # bundled CUDA/Linux pip wheels
+├── wheels-macos/           # optional bundled Apple Silicon pip wheels
+├── requirements-common.txt # dependencies shared by both platforms
+├── requirements-macos.txt  # Apple Silicon/MPS dependencies
+└── requirements-lock.txt   # exact CUDA/Linux environment
 ```
 
 ## Quick start (on this machine)
@@ -81,6 +87,45 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 Run only one instance when GPU memory is limited. Each process loads its own
 VAD, speaker and ASR model instances.
+
+## macOS on Apple Silicon (M1–M4)
+
+The supported Mac path uses PyTorch’s `mps` device, which runs the models on
+the Apple GPU through Metal. It does not use the Apple Neural Engine (ANE):
+PyTorch MPS and Core ML/Core AI are separate runtimes, and this Python
+pipeline has not been exported to Core ML/Core AI.
+
+On the Mac, with network access for the initial setup:
+
+```bash
+brew install python@3.12 ffmpeg       # ffmpeg is needed for mp3/aac/m4a
+scripts/install_macos.sh               # creates .venv and downloads models
+scripts/run_macos.sh                   # starts on MPS at 127.0.0.1:8000
+curl http://127.0.0.1:8000/health
+```
+
+Use `scripts/install_macos.sh --skip-models` when the `models/` directory is
+already bundled. Set `FUNASR_DEVICE=cpu` if MPS is unavailable or if a model
+operation needs CPU-only execution. The normal `scripts/run_server.sh` also
+auto-selects `mps` on arm64 macOS and keeps `cuda` as the Linux default.
+
+For a fully offline Mac deployment, prepare the bundle on an Apple Silicon
+Mac after the networked install:
+
+```bash
+scripts/download_wheels.sh macos  # writes wheels-macos/ and requirements-macos-lock.txt
+```
+
+Copy the project, `models/`, `wheels-macos/`, and
+`requirements-macos-lock.txt` to the offline Mac, then run:
+
+```bash
+scripts/install_offline.sh macos
+scripts/run_macos.sh
+```
+
+The CUDA and macOS wheel sets are intentionally kept separate because CUDA
+wheels cannot be installed on Apple Silicon.
 
 ## Realtime WebSocket protocol (`/ws`)
 
@@ -153,7 +198,7 @@ single-utterance files always return `speakers: 1`.
 | Variable | Default | Meaning |
 |---|---|---|
 | `FUNASR_HOST` / `FUNASR_PORT` | `127.0.0.1` / `8000` | bind address |
-| `FUNASR_DEVICE` | `cuda` | `cuda` or `cpu` |
+| `FUNASR_DEVICE` | `cuda` on Linux / `mps` on arm64 macOS | `cuda`, `mps` (Apple Silicon), or `cpu` |
 | `FUNASR_ASR_MODEL` | `models/SenseVoiceSmall` | local model dir, or `Fun-ASR-Nano-2512` |
 | `FUNASR_ASR_HUB` | `ms` | model hub for custom ASR checkpoints |
 | `FUNASR_VAD_MODEL` | `models/fsmn-vad` | local model dir |
@@ -192,7 +237,7 @@ component; the service passes in-memory audio tensors for that model and keeps
 the same VAD chunking and diarization pipeline around it. The returned segment
 timestamps are this service's chunk windows, not word-level timestamps.
 
-Concurrency model: a **single process owns the GPU**; blocking `generate()`
+Concurrency model: a **single process owns the selected accelerator**; blocking `generate()`
 calls run on a thread pool, gated by async semaphores (`CONCURRENT_ASR` is the
 main GPU knob). HTTP and WS share the same semaphores, so total GPU work stays
 bounded regardless of client count. Never run multiple workers of this app.
@@ -255,6 +300,10 @@ sudo cp deploy/funasr-core.service /etc/systemd/system/ && sudo systemctl enable
 
 Server prerequisites: NVIDIA driver ≥ 570 (CUDA 12.8 capable), `python3.12`,
 and `ffmpeg` on PATH if you need mp3/aac uploads (wav/flac/ogg work without it).
+
+For Apple Silicon prerequisites and installation, see [macOS on Apple Silicon
+(M1–M4)](#macos-on-apple-silicon-m1m4). The Mac install uses the regular PyPI
+PyTorch wheels rather than the CUDA index.
 
 ## Verification checklist
 

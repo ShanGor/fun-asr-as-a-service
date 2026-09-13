@@ -1,9 +1,18 @@
 import os
+import platform
+import sys
 from pathlib import Path
 
 import yaml
 
 DEFAULT_MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+
+
+def _default_device() -> str:
+    """Choose the native accelerator without changing Linux defaults."""
+    if sys.platform == "darwin" and platform.machine().lower() in {"arm64", "aarch64"}:
+        return "mps"
+    return "cuda"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -42,7 +51,7 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
         "vad_model": os.environ.get("FUNASR_VAD_MODEL", "fsmn-vad"),
         "punc_model": os.environ.get("FUNASR_PUNC_MODEL", ""),
         "spk_model": os.environ.get("FUNASR_SPK_MODEL", "campplus"),
-        "device": os.environ.get("FUNASR_DEVICE", "cuda"),
+        "device": os.environ.get("FUNASR_DEVICE", _default_device()),
         "host": os.environ.get("FUNASR_HOST", "127.0.0.1"),
         "port": _env_int("FUNASR_PORT", 8000),
         "worker_threads": _env_int("FUNASR_WORKER_THREADS", max(8, os.cpu_count() or 8)),

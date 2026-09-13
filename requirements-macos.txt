@@ -1,0 +1,5 @@
+# Apple Silicon (arm64) environment. PyTorch's MPS backend uses Metal GPU
+# acceleration on M-series Macs; it does not directly target the Neural Engine.
+-r requirements-common.txt
+torch==2.11.0
+torchaudio==2.11.0

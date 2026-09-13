@@ -64,11 +64,22 @@ env vars (defaults: `models/SenseVoiceSmall`, `models/fsmn-vad`,
 
 ## Q5. Is the service offline?
 
-Yes. All weights are bundled under `models/` and all pip wheels under
-`wheels/`; the server performs no network access at runtime.
+Yes. All weights are bundled under `models/` and platform-specific pip wheels
+can be bundled under `wheels/` (CUDA/Linux) or `wheels-macos/` (Apple
+Silicon); the server performs no network access at runtime.
 
 ## Q6. What output does the ASR produce (emotions/events)?
 
 SenseVoiceSmall natively emits emotion/event tags, but this service strips
 them (see README) and returns clean text, with optional ITN
 (inverse text normalization) and timestamps via `verbose_json`.
+
+## Q7. Can I run this on an M4 Mac, and does it use the NPU?
+
+Yes. Run `scripts/install_macos.sh` followed by `scripts/run_macos.sh`. The
+installer selects the arm64 PyTorch build and the service uses `mps`, PyTorch's
+Metal GPU backend. Set `FUNASR_DEVICE=cpu` to force CPU execution.
+
+The current Python/FunASR path does **not** directly use Apple's Neural Engine
+(ANE). ANE acceleration would require a separate Core ML/Core AI model export
+and native runtime integration; it is not enabled by selecting `mps`.

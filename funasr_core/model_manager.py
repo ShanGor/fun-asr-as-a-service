@@ -145,7 +145,7 @@ class ModelManager:
         return self._spk
 
     def warmup(self) -> None:
-        """Load models and run a tiny dummy inference to force CUDA init."""
+        """Load models and run a tiny dummy inference to initialize the backend."""
         self.vad
         self.asr
         dummy = np.zeros(int(0.1 * SAMPLE_RATE), dtype=np.float32)

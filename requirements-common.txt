@@ -1,0 +1,10 @@
+# Dependencies shared by the CUDA and Apple Silicon environments.
+funasr
+modelscope
+fastapi
+uvicorn[standard]
+python-multipart
+soundfile
+pyyaml
+websockets
+scikit-learn
