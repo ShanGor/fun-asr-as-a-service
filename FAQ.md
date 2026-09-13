@@ -5,21 +5,26 @@ Answers to the most common questions about this FunASR service
 
 ## Q1. What is the parameter size of the FunASR model we use?
 
-We run **SenseVoiceSmall** for ASR, **FSMN-VAD** for speech segmentation and
-**CAM++** for speaker embeddings (diarization).
+We run **Fun-ASR-Nano-2512** for ASR, **FSMN-VAD** for speech segmentation and
+**CAM++** for speaker embeddings (diarization). Fun-ASR-Nano is an audio-LLM:
+an audio encoder + adaptor + CTC head wrapped around a **Qwen3-0.6B** language
+model.
 
 | Model | Type | Parameter count | Model file size |
 |---|---|---|---|
-| `models/SenseVoiceSmall` | Non-autoregressive multilingual ASR (zh/yue/en/ja/ko + ~50 langs, with LID / emotion / event / ITN) | **~234 M params** (233,999,167, verified by counting weights in this repo) | ~936 MB (`model.pt`) |
+| `models/Fun-ASR-Nano-2512` | Audio-LLM ASR (zh + 7 dialects / 26 regional accents, en, ja; lyrics & rap; no emotion/event tags) | **~1.02 B params** (1,024,440,131, verified by counting weights in this repo; official figure 800M) | ~2.0 GiB (`model.pt`, bf16; self-contained with embedded LLM weights) |
+| `models/Qwen3-0.6B` | Qwen3-0.6B LLM component used by Fun-ASR-Nano | 0.6 B params | ~1.4 GiB (`model.safetensors`) |
 | `models/fsmn-vad` | Voice activity detection (streaming + offline) | **~0.4 M params** (tiny, streaming-friendly) | ~1.7 MB (`model.pt`) |
 | `models/campplus` | CAM++ speaker embeddings (diarization) | ~7 M params | ~28 MB (`campplus_cn_common.bin`) |
 
 Notes:
-- The 234M figure is a *model parameter* count, not disk size. Disk size is
-  larger (~936 MB) because the checkpoint stores fp32 weights plus
-  state/tokenizer artifacts.
-- Compared to Whisper: SenseVoiceSmall has roughly the parameter size of
-  Whisper-Small but is much faster (non-autoregressive decoder).
+- The 1.02B figure is a *checkpoint* count: `model.pt` embeds the full LLM
+  weights, so the file is self-contained. `models/Qwen3-0.6B` is the reference
+  component the model config also points at (`init_param_path`).
+- Compared to the previously used SenseVoiceSmall (234M, non-autoregressive):
+  Fun-ASR-Nano is larger and autoregressive, but adds Chinese dialect /
+  regional-accent coverage, lyrics and rap recognition, and an optional vLLM
+  serving backend (see Q9). It does **not** emit emotion/event/LID tags.
 
 ## Q2. Does it support diarization (speaker separation)?
 
@@ -53,14 +58,16 @@ bundled wheels.
 
 ## Q4. Which models does this service actually load?
 
-- `models/SenseVoiceSmall` → ASR (multilingual)
+- `models/Fun-ASR-Nano-2512` → ASR (Chinese dialects / English / Japanese),
+  with its `models/Qwen3-0.6B` LLM component
 - `models/fsmn-vad` → VAD
 - `models/campplus` → speaker embeddings for diarization (see Q2)
 - No punctuation model.
 
 Configured via `FUNASR_ASR_MODEL`, `FUNASR_VAD_MODEL` and `FUNASR_SPK_MODEL`
-env vars (defaults: `models/SenseVoiceSmall`, `models/fsmn-vad`,
-`models/campplus`).
+env vars (defaults: `Fun-ASR-Nano-2512`, `fsmn-vad`, `campplus`). This
+deployment is started with `FUNASR_ASR_MODEL=Fun-ASR-Nano-2512`; SenseVoiceSmall
+is no longer bundled under `models/`.
 
 ## Q5. Is the service offline?
 
@@ -70,9 +77,9 @@ Silicon); the server performs no network access at runtime.
 
 ## Q6. What output does the ASR produce (emotions/events)?
 
-SenseVoiceSmall natively emits emotion/event tags, but this service strips
-them (see README) and returns clean text, with optional ITN
-(inverse text normalization) and timestamps via `verbose_json`.
+Fun-ASR-Nano-2512 does not emit emotion/event tags, and the service
+additionally strips any special/rich tags before returning clean text, with
+optional ITN (inverse text normalization) and timestamps via `verbose_json`.
 
 ## Q7. Can I run this on an M4 Mac, and does it use the NPU?
 
