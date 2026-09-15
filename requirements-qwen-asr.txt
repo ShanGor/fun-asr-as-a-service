@@ -1,0 +1,8 @@
+# Optional Qwen3-ASR runtime. Install this in the same virtual environment
+# before starting the service with FUNASR_ASR_MODEL=Qwen3-ASR-0.6B or
+# FUNASR_ASR_MODEL=Qwen3-ASR-1.7B.
+# These versions are the compatibility pair documented by FunASR's Qwen3-ASR
+# adapter; do not let an unrelated Transformers upgrade split the pair.
+qwen-asr==0.0.6
+transformers==4.57.6
+accelerate

@@ -21,6 +21,23 @@ _RICH_TAG_RE = re.compile(r"<\|[^|]*\|>")
 SPEAKER_DISTANCE_THRESHOLD = 0.45
 
 
+def _is_qwen3_asr_model(model_path: Optional[str]) -> bool:
+    """Return whether a configured checkpoint is a Qwen3-ASR model."""
+    return "qwen3-asr" in str(model_path or "").lower()
+
+
+_QWEN3_ASR_MODEL_IDS = {
+    "qwen3-asr-0.6b": "Qwen/Qwen3-ASR-0.6B",
+    "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B",
+}
+
+
+def _qwen3_asr_model_id(model_path: str) -> str:
+    """Map a downloaded Qwen3-ASR directory back to its registry key."""
+    model_name = Path(str(model_path)).name.casefold()
+    return _QWEN3_ASR_MODEL_IDS.get(model_name, model_path)
+
+
 def split_long_segments(
     segments: List[Tuple[int, int]], max_ms: int
 ) -> List[Tuple[int, int]]:
@@ -115,6 +132,11 @@ class ModelManager:
             kwargs.update({"trust_remote_code": True,
                            "remote_code": str(Path(model_path) / "model.py"),
                            "hub": self.cfg.get("asr_hub", "ms")})
+        # Qwen3-ASR's transformers backend follows the upstream device_map
+        # convention and needs an indexed CUDA device. Keep the generic
+        # ``cuda`` value for the other FunASR models.
+        if _is_qwen3_asr_model(model_path) and kwargs["device"] == "cuda":
+            kwargs["device"] = "cuda:0"
         return kwargs
 
     @property
@@ -122,7 +144,18 @@ class ModelManager:
         if self._asr is None:
             with self._lock:
                 if self._asr is None:
-                    self._asr = AutoModel(model=self.cfg["asr_model"], **self._auto_model_kwargs(self.cfg["asr_model"]))
+                    model_path = self.cfg["asr_model"]
+                    model_kwargs = self._auto_model_kwargs(model_path)
+                    model_name = model_path
+                    if _is_qwen3_asr_model(model_path) and Path(model_path).is_dir():
+                        # Qwen's repository contains Transformers files and a
+                        # minimal FunASR configuration.json, so AutoModel
+                        # cannot infer its registry key from the local path.
+                        # Keep the weights local while passing the registered
+                        # model ID as ``model``.
+                        model_kwargs["model_path"] = str(Path(model_path))
+                        model_name = _qwen3_asr_model_id(model_path)
+                    self._asr = AutoModel(model=model_name, **model_kwargs)
         return self._asr
 
     @property
@@ -149,9 +182,11 @@ class ModelManager:
         self.vad
         self.asr
         dummy = np.zeros(int(0.1 * SAMPLE_RATE), dtype=np.float32)
-        if (Path(self.cfg.get("asr_model", "")) / "model.py").is_file():
+        if ((Path(self.cfg.get("asr_model", "")) / "model.py").is_file()
+                or _is_qwen3_asr_model(self.cfg.get("asr_model"))):
             # Custom LLM-ASR checkpoints may autoregress on silence without
-            # emitting EOS; loading the weights is sufficient CUDA warmup.
+            # emitting EOS; Qwen3-ASR also rejects very short warmup audio.
+            # Loading the weights is sufficient warmup for both model types.
             pass
         else:
             self.asr.generate(input=dummy, language="auto", use_itn=False)

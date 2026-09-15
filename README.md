@@ -5,7 +5,7 @@ Silicon host. The original deployment is tested on an RTX 5080 / 16 GB
 (Blackwell sm_120, torch 2.11 + cu128); Apple Silicon uses PyTorch MPS.
 
 - **Default ASR**: SenseVoiceSmall (234M parameters; multilingual speech, emotion and event tags stripped)
-- **Optional larger ASR**: Fun-ASR-Nano-2512 (800M parameters; Chinese, English, Japanese and Chinese dialects)
+- **Optional ASR**: Fun-ASR-Nano-2512 (800M parameters; Chinese, English, Japanese and Chinese dialects) or Qwen3-ASR (52 languages)
 - **VAD**: FSMN-VAD (streaming and offline segmentation)
 - **Diarization**: CAM++ speaker embeddings + clustering — `speaker` label per segment
 - **HTTP API**: OpenAI-compatible `POST /v1/audio/transcriptions`, `GET /health`, `GET /v1/models`
@@ -44,6 +44,7 @@ fun-asr/
 ├── wheels/                 # bundled CUDA/Linux pip wheels
 ├── wheels-macos/           # optional bundled Apple Silicon pip wheels
 ├── requirements-common.txt # dependencies shared by both platforms
+├── requirements-qwen-asr.txt # optional Qwen3-ASR runtime dependencies
 ├── requirements-macos.txt  # Apple Silicon/MPS dependencies
 └── requirements-lock.txt   # exact CUDA/Linux environment
 ```
@@ -95,6 +96,22 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 Run only one instance when GPU memory is limited. Each process loads its own
 VAD, speaker and ASR model instances.
+
+After the baseline models are installed, test the optional multilingual
+Qwen3-ASR checkpoint by installing its runtime and downloading one of the two
+model sizes. The 0.6B model uses less GPU memory; the 1.7B model is the more
+accurate option.
+
+```bash
+.venv/bin/pip install -r requirements-qwen-asr.txt
+.venv/bin/python scripts/download_models.py --models Qwen3-ASR-0.6B
+FUNASR_ASR_MODEL=Qwen3-ASR-0.6B ./scripts/run_server.sh
+```
+
+Use `Qwen3-ASR-1.7B` in both commands for the larger checkpoint. The
+downloader also accepts `Qwen-ASR`, `Qwen-ASR-0.6B`, and `Qwen-ASR-1.7B` as
+aliases. With the default `FUNASR_LANGUAGE=auto`, Qwen3-ASR detects the input
+language automatically.
 
 ## macOS on Apple Silicon (M1–M4)
 
@@ -298,6 +315,10 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt \
 .venv/bin/python scripts/download_models.py     # baseline models (~1 GB)
 # Optional comparison checkpoint and Qwen component (~3.7 GB extra):
 .venv/bin/python scripts/download_models.py --models Fun-ASR-Nano-2512 Qwen3-0.6B
+# Optional multilingual checkpoint (choose 0.6B or 1.7B):
+.venv/bin/python scripts/download_models.py --models Qwen3-ASR-0.6B
+# Install this before bundling wheels if the offline server will use Qwen3-ASR:
+.venv/bin/pip install -r requirements-qwen-asr.txt
 scripts/download_wheels.sh                      # fills ./wheels, writes requirements-lock.txt
 ```
 

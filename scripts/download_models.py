@@ -9,6 +9,8 @@ Models:
   - SenseVoiceSmall   : multilingual ASR (zh/yue/en/ja/ko + 50 langs)
   - Fun-ASR-Nano-2512 : larger 800M-parameter ASR (Chinese/English/Japanese)
   - Qwen3-0.6B       : language component required by Fun-ASR-Nano-2512
+  - Qwen3-ASR-0.6B   : optional multilingual Qwen3-ASR checkpoint (52 langs)
+  - Qwen3-ASR-1.7B   : optional, larger/more accurate multilingual checkpoint
   - fsmn-vad          : streaming + offline voice activity detection
   - campplus          : speaker embeddings for diarization
 """
@@ -23,8 +25,19 @@ DEFAULT_MODELS = {
     "campplus": "iic/speech_campplus_sv_zh-cn_16k-common",
     "Fun-ASR-Nano-2512": "FunAudioLLM/Fun-ASR-Nano-2512",
     "Qwen3-0.6B": "Qwen/Qwen3-0.6B",
+    "Qwen3-ASR-0.6B": "Qwen/Qwen3-ASR-0.6B",
+    "Qwen3-ASR-1.7B": "Qwen/Qwen3-ASR-1.7B",
 }
 DEFAULT_DOWNLOAD_MODELS = ("SenseVoiceSmall", "fsmn-vad", "campplus")
+
+# Accept the shorter name used in casual references without creating a
+# second local copy of the same checkpoint. The canonical names above are
+# also the names used by FUNASR_ASR_MODEL when starting the service.
+MODEL_ALIASES = {
+    "Qwen-ASR": "Qwen3-ASR-1.7B",
+    "Qwen-ASR-0.6B": "Qwen3-ASR-0.6B",
+    "Qwen-ASR-1.7B": "Qwen3-ASR-1.7B",
+}
 
 FUN_ASR_CODE_URLS = {
     "model.py": "https://raw.githubusercontent.com/FunAudioLLM/Fun-ASR/main/model.py",
@@ -51,10 +64,11 @@ def main() -> int:
     from modelscope import snapshot_download
 
     failures = []
-    for local_name in args.models:
+    for requested_name in args.models:
+        local_name = MODEL_ALIASES.get(requested_name, requested_name)
         model_id = DEFAULT_MODELS.get(local_name)
         if model_id is None:
-            print(f"[skip] unknown model: {local_name}")
+            print(f"[skip] unknown model: {requested_name}")
             continue
         target = models_dir / local_name
         already = target.is_dir() and (
